@@ -10,6 +10,8 @@ import android.os.Parcelable
 import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
+import org.apache.commons.csv.CSVFormat
+import org.apache.commons.csv.CSVPrinter
 import org.msgpack.MessagePack
 import org.msgpack.annotation.Message
 import java.io.IOException
@@ -45,6 +47,7 @@ Message class BtMessage(): Parcelable {
 }
 
 data class Benchmark(val bytes: Int, val time: Long)
+val headers = arrayOf("client", "server", "bytes", "time") // .map{it as Object}.toTypedArray()
 
 
 public class MainActivity : Activity() {
@@ -98,9 +101,11 @@ public class MainActivity : Activity() {
             tr.start()
             Log.d(TAG, "joining thread")
             tr.join()
-            Log.d(TAG, "runs:")
-            for(r in br.runs) {
-                Log.d(TAG, "${r.toString()}")
+            val format = CSVFormat.DEFAULT.withRecordSeparator("\n");
+            val printer = CSVPrinter(System.out, format)
+            printer.printRecord("from", "to", "bytes", "nanoseconds")
+            br.runs.forEach { record ->
+                printer.printRecord("nexus", "redmi", record.bytes, record.time)
             }
         }
 
@@ -169,7 +174,7 @@ public class MainActivity : Activity() {
             try {
                 val msgpack = MessagePack()
                 val outstream = socket.getOutputStream()
-                val buffer = ByteArray(1024)
+                val buffer = ByteArray(1024 * 1024)
                 var counter = 0
 
                 Log.d(TAG, "got connection from ${socket.getRemoteDevice()}")
