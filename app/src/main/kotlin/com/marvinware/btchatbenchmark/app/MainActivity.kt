@@ -32,8 +32,10 @@ public class MainActivity : Activity() {
 
         private val defaultIterations = 10
         private val defaultMessageSize = 1024
+        private val defaultMessages = 1
 
         override fun serve(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
+            Log.d(TAG, "got a connection")
             val url = session.getUri()
             return when {
                 url.contains("/mac") -> handleMac()
@@ -47,7 +49,7 @@ public class MainActivity : Activity() {
 
         private fun handleM(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
             val params = decodeParameters(session.getQueryParameterString())
-            val targets: List<BluetoothDevice> = params.getOrElse("targets", {listOf()})
+            val targets: List<BluetoothDevice> = params.getOrElse("target", {listOf()})
                     .filter { mac -> BluetoothAdapter.checkBluetoothAddress(mac) }
                     .map { mac -> btAdapter.getRemoteDevice(mac) }
 
@@ -60,7 +62,11 @@ public class MainActivity : Activity() {
             }
 
             // TODO: this should be a parameter
-            val messages = 50
+            val messages = try {
+                Integer.parseInt(params.get("messages")?.first())
+            } catch(n: NumberFormatException) {
+                defaultMessages
+            }
 
             val size: Int = try {
                 Integer.parseInt(params.get("size")?.first())
