@@ -4,31 +4,109 @@ import os
 import requests
 import csv
 import matplotlib.pyplot as plt
-from collections import namedtuple
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Do some benchmarks.')
 
-    parser.add_argument('--net_prefix', '-p', type=str, metavar='NET_PREFIX',
+    parser.add_argument('--net_prefix', '-n', type=str, metavar='NET_PREFIX',
                         help='Prefix of the network (e.g. 192.168.1. )',
                         nargs='?', default='')
 
-    parser.add_argument('device_ip_address', type=str, metavar='DEVICE',
-                        help='IP address of the device '
-                             'that will perform the benchmark')
+    # parser.add_argument('device_ip_address', type=str, metavar='DEVICE',
+    #                     help='IP address of the device '
+    #                          'that will perform the benchmark')
 
-    parser.add_argument('targets_ip_addresses', metavar='TARGET', type=str,
+    parser.add_argument('devices_ip_addresses', metavar='DEVICE', type=str,
                         help='IP address of target devices', nargs='+')
 
-    parser.add_argument('devices service port', type=int, metavar='PORT',
-                        nargs='?', help='Port of the HTTP server in devices',
+    parser.add_argument('--port', '-p',
+                        type=int, metavar='PORT',
+                        help='Port of the HTTP server in devices',
                         default=38080)
+
+    parser.add_argument('--cache', '-c', dest='cache', action='store_const',
+                        const=True, default=False,
+                        help='Port of the HTTP server in devices')
 
     return parser.parse_args()
 
 
-def get_report(d_addr, t_mac):
+
+
+def mk_groups(data):
+    try:
+        newdata = data.items()
+    except:
+        return
+
+    thisgroup = []
+    groups = []
+    for key, value in newdata:
+        newgroups = mk_groups(value)
+        if newgroups is None:
+            thisgroup.append((key, value))
+        else:
+            thisgroup.append((key, len(newgroups[-1])))
+            if groups:
+                groups = [g + n for n, g in zip(newgroups, groups)]
+            else:
+                groups = newgroups
+    return [thisgroup] + groups
+
+
+def add_line(ax, xpos, ypos):
+    line = plt.Line2D([xpos, xpos], [ypos + .1, ypos],
+                      transform=ax.transAxes, color='black')
+    line.set_clip_on(False)
+    ax.add_line(line)
+
+
+def label_group_bar(fig, ax, data):
+    groups = mk_groups(data)
+    xy = groups.pop()
+    x, y = zip(*xy)
+    ly = len(y)
+    xticks = range(1, ly + 1)
+
+    ax.bar(xticks, y, align='center')
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(x, rotation='vertical')
+    ax.set_xlim(.5, ly + .5)
+    ax.yaxis.grid(True)
+
+    plt.ylabel('Throughput (kbits / s)')
+
+    scale = 1. / ly
+    for pos in xrange(ly + 1):
+        add_line(ax, pos * scale, -.1)
+    ypos = 1.02
+    while groups:
+        group = groups.pop()
+        pos = 0
+        for label, rpos in group:
+            lxpos = (pos + .5 * rpos) * scale
+            ax.text(lxpos, ypos, label, ha='center', transform=ax.transAxes)
+            add_line(ax, pos * scale, 1)
+            pos += rpos
+        add_line(ax, pos * scale, 1)
+        ypos -= .1
+
+# if __name__ == '__main__':
+#     fig = plt.figure()
+#     ax = fig.add_subplot(1,1,1)
+#     label_group_bar(ax, data)
+#     fig.subplots_adjust(bottom=0.3)
+#     fig.savefig('label_group_bar_example.png')
+
+
+
+
+def get_report(d_addr, t_mac, cached=False):
+    path = 'csv/throughput-{0}-{1}'.format(d_addr, t_mac)
+    if cached:
+        if os.path.exists(path):
+            return csv.DictReader(open(path, 'r'))
+
     url = 'http://{0}:38080/throughput?target={1}'.format(d_addr, t_mac)
 
     try:
@@ -36,8 +114,7 @@ def get_report(d_addr, t_mac):
     except requests.ConnectionError:
         return []
 
-    os.makedirs('csv')
-    with open('csv/throughput-{0}-{1}'.format(d_addr, t_mac), 'w') as f:
+    with open(path, 'w') as f:
         f.write(csv_file)
 
     reader = csv.DictReader(StringIO(csv_file))
@@ -64,42 +141,68 @@ def main():
 
     mac_url = lambda s_ip: 'http://{0}:38080/mac'.format(s_ip)
 
-    d_addr = args.net_prefix + args.device_ip_address
+    devices = []
 
-    targets = []
-
-    print 'Collecting info about targets'
-    for t_addr in args.targets_ip_addresses:
+    print 'Collecting info about devices'
+    for t_addr in args.devices_ip_addresses:
         t_addr = args.net_prefix + t_addr
         print t_addr
-        t_name, t_mac = requests.get(mac_url(t_addr)).content.split('\n')
+        # if t_addr.endswith('115'):
+        #     time.sleep(2)
+        #     for c in "PORCA TROIA GALAXY TAB DI MERDA SE NON TI SVEGLI!!!\n*FANCULO, FACCIO A MENO\n":
+        #         if c == '*':
+        #             time.sleep(1)
+        #             continue
+        #         time.sleep(0.01)
+        #         sys.stdout.write(c)
+        #         sys.stdout.flush()
+        #     continue
 
-        targets.append(dict(name=t_name, mac=t_mac, ip=t_addr))
-    print targets
+        t_name, t_mac = requests.get(mac_url(t_addr)).content.split('\n')
+        devices.append(dict(name=t_name, mac=t_mac, ip=t_addr))
+
+    print devices
 
     print 'Running benchmarks:'
-    for t in targets:
-        t['throughput'] = None
-        while t['throughput'] is None:
-            print t['name']
-            report = get_report(d_addr, t['mac'])
-            print report
+    results = {}
+    for receiver in devices:
+        for sender in devices:
+            if receiver == sender:
+                continue
 
-            t['throughput'] = avg(map(
-                lambda x:
-                ((float(x['bytes']) * 8) / 10 ** 3) /  # kBits
-                (float(x['nanotime']) / 10 ** 9),      # / s
-                report))
+            r_name = receiver['name']
+            s_name = sender['name']
 
-            if t['throughput'] is None:
-                print 'FAILED. Retrying'
+            if r_name not in results:
+                results[r_name] = {}
+
+            results[r_name][s_name] = None
+            while results[r_name][s_name] is None:
+                print r_name, ' <- ', sender['name']
+
+                get_report(receiver['ip'], sender['mac'], args.cache)  # warmup
+                report = get_report(receiver['ip'], sender['mac'], args.cache)
+                print report
+
+                results[r_name][s_name] = avg(map(
+                    lambda x:
+                    ((float(x['bytes']) * 8) / 10 ** 3) /  # kBits
+                    (float(x['nanotime']) / 10 ** 9),      # / s
+                    report))
+
+                if results[r_name][s_name] is None:
+                    print 'FAILED. Retrying'
 
     print 'Plotting'
-    hist(
-        [t['throughput'] for t in targets],
-        [t['name'] for t in targets]
-    )
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    label_group_bar(fig, ax, results)
+    fig.subplots_adjust(bottom=0.3)
+    fig.savefig('plot.png')
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
