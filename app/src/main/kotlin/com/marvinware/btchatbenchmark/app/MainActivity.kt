@@ -46,14 +46,19 @@ public class MainActivity : Activity() {
 
         private fun handleM(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
             val params = decodeParameters(session.getQueryParameterString())
-            val targets: List<BluetoothDevice> = params.getOrElse("targets", {listOf()}).map({ mac ->
+            val _targets = params.getOrElse("targets", {listOf()})
+            var targets = ArrayList<BluetoothDevice>(0)
+
+            for(mac in _targets) {
                 try {
-                    btAdapter.getRemoteDevice(mac)
-                }catch(e: IllegalArgumentException) {
+                    val device = btAdapter.getRemoteDevice(mac)
+                    if(device != null) {
+                        targets.add(device)
+                    }
+                } catch(e: IllegalArgumentException) {
                     Log.d(TAG, "${mac} is not a valid mac")
-                    null
                 }
-            }).filter({ it != null }).map({ it as BluetoothDevice })
+            }
 
             if(targets.size() < 1) {
                 return NanoHTTPD.Response(
