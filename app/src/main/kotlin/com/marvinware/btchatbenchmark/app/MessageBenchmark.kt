@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
 import android.util.Log
 import org.msgpack.MessagePack
+import org.msgpack.annotation.Index
 import org.msgpack.annotation.Message
 import java.io.IOException
 import java.util.*
@@ -34,7 +35,8 @@ data class MessageTimes(
 )
 
 Message data class MessageRequest(var uuid: String = "", var content: ByteArray = ByteArray(0))
-Message data class MessageResponse(var uuid: String = "", var received: Long = 0)
+Message data class MessageResponse(Index(0) var uuid: String = "", Index(1) var received: Long = 0)
+
 
 
 class MessageRunner(
@@ -57,7 +59,7 @@ class MessageRunner(
         for(i in 1..messages){
             devices.forEach { device ->
                 val uuid = UUID.randomUUID().toString()
-                uuidDevice.put(device.getName(), uuid)
+                uuidDevice.put(uuid, device.getName())
                 outgoing.execute(MessageSender(
                         uuid = uuid,
                         started = System.currentTimeMillis(),
@@ -69,6 +71,7 @@ class MessageRunner(
             }
         }
         Log.d(MESSAGE_TAG, "will wait for all processes to terminate")
+        Log.d(MESSAGE_TAG, "${uuidDevice.toString()}")
         waitGroup.await()
         return results.map { pair ->
             val times = pair.getValue()
@@ -105,6 +108,7 @@ class MessageSender(uuid: String, started: Long, messageSize: Int, device: Bluet
             random.nextBytes(buffer)
             val outMsg = MessageRequest(uuid, buffer)
             msgpack.write(output, outMsg)
+
             val inMsg = msgpack.read(input, javaClass<MessageResponse>())
             val finished = System.currentTimeMillis()
             results.set(uuid, MessageTimes(started, inMsg.received, finished))
@@ -144,17 +148,17 @@ class MessageHandler(socket: BluetoothSocket, received: Long): Runnable {
 
     override fun run() {
         val msgpack = MessagePack()
-        socket.use { socket ->
-            val input = socket.getInputStream()
-            val output = socket.getOutputStream()
-            try {
-                val message = msgpack.read(input, javaClass<MessageRequest>())
-                val outgoing = MessageResponse(message.uuid, received)
-                msgpack.write(output, outgoing)
-            }catch(i: IOException) {
-                Log.e(MESSAGE_TAG, "error answering to message", i)
-                return
-            }
+        val input = socket.getInputStream()
+        val output = socket.getOutputStream()
+        try {
+            val message = msgpack.read(input, javaClass<MessageRequest>())
+            Log.d(MESSAGE_TAG, "got message ${message.toString()}")
+            val outgoing = MessageResponse(message.uuid, received)
+            Log.d(MESSAGE_TAG, "writing message ${outgoing.toString()}")
+            msgpack.write(output, outgoing)
+        }catch(i: IOException) {
+            Log.e(MESSAGE_TAG, "error answering to message", i)
+            return
         }
     }
 }
