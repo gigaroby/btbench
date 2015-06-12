@@ -51,7 +51,7 @@ class MessageRunner(
     val messages = messages
 
     fun execute(): List<MessageResult> {
-        val waitGroup = CountDownLatch((messages * devices.size()) as Int)
+        val waitGroup = CountDownLatch(messages * devices.size())
         val results = ConcurrentHashMap<String, MessageTimes>()
         val uuidDevice = HashMap<String, String>()
         for(i in 1..messages){
@@ -144,7 +144,6 @@ class MessageHandler(socket: BluetoothSocket, received: Long): Runnable {
 
     override fun run() {
         val msgpack = MessagePack()
-        val received = System.currentTimeMillis()
         socket.use { socket ->
             val input = socket.getInputStream()
             val output = socket.getOutputStream()

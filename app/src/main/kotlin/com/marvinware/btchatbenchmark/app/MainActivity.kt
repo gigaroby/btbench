@@ -25,6 +25,7 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import kotlin.properties.Delegates
 
+
 public class MainActivity : Activity() {
 
     inner class BenchmarkServer: NanoHTTPD(38080) {
@@ -46,19 +47,9 @@ public class MainActivity : Activity() {
 
         private fun handleM(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
             val params = decodeParameters(session.getQueryParameterString())
-            val _targets = params.getOrElse("targets", {listOf()})
-            var targets = ArrayList<BluetoothDevice>(0)
-
-            for(mac in _targets) {
-                try {
-                    val device = btAdapter.getRemoteDevice(mac)
-                    if(device != null) {
-                        targets.add(device)
-                    }
-                } catch(e: IllegalArgumentException) {
-                    Log.d(TAG, "${mac} is not a valid mac")
-                }
-            }
+            val targets: List<BluetoothDevice> = params.getOrElse("targets", {listOf()})
+                    .filter { mac -> BluetoothAdapter.checkBluetoothAddress(mac) }
+                    .map { mac -> btAdapter.getRemoteDevice(mac) }
 
             if(targets.size() < 1) {
                 return NanoHTTPD.Response(
