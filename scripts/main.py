@@ -4,6 +4,18 @@ import os
 import requests
 import csv
 import matplotlib.pyplot as plt
+import sys
+import urllib
+
+# todo: remove me!!
+HARDCODED_DEVICES = [
+    {'name': 'Nexus 5', 'ip': '192.168.1.107', 'mac': 'BC:F5:AC:5C:50:87'},
+    {'name': 'Galaxy tab', 'ip': '192.168.1.102', 'mac': '18:22:7E:FC:83:09'},
+    {'name': 'Redmi', 'ip': '192.168.1.116', 'mac': '74:51:BA:46:90:A2'},
+    {'name': 'GalaxyS3', 'ip': '192.168.1.100', 'mac': '9C:65:B0:88:03:28'},
+    {'name': 'Nexus 7', 'ip': '192.168.1.111', 'mac': '50:46:5D:CC:65:4E'},
+]
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Do some benchmarks.')
@@ -11,10 +23,6 @@ def parse_args():
     parser.add_argument('--net_prefix', '-n', type=str, metavar='NET_PREFIX',
                         help='Prefix of the network (e.g. 192.168.1. )',
                         nargs='?', default='')
-
-    # parser.add_argument('device_ip_address', type=str, metavar='DEVICE',
-    #                     help='IP address of the device '
-    #                          'that will perform the benchmark')
 
     parser.add_argument('devices_ip_addresses', metavar='DEVICE', type=str,
                         help='IP address of target devices', nargs='+')
@@ -28,15 +36,28 @@ def parse_args():
                         const=True, default=False,
                         help='Port of the HTTP server in devices')
 
-    return parser.parse_args()
+    parser.add_argument('--throughput', '-t', dest='throughput',
+                        action='store_const', const=True, default=False,
+                        help='Throughput test.')
 
+    parser.add_argument('--messages', '-m', dest='messages',
+                        action='store_const', const=True, default=False,
+                        help='Messages per second test.')
 
+    args = parser.parse_args()
+    if not args.throughput and not args.messages:
+        print 'ERROR. You must specify at least an action!'
+        print
+
+        parser.print_help()
+
+    return args
 
 
 def mk_groups(data):
     try:
         newdata = data.items()
-    except:
+    except AttributeError:
         return
 
     thisgroup = []
@@ -61,7 +82,7 @@ def add_line(ax, xpos, ypos):
     ax.add_line(line)
 
 
-def label_group_bar(fig, ax, data):
+def label_group_bar(fig, ax, data, ylabel):
     groups = mk_groups(data)
     xy = groups.pop()
     x, y = zip(*xy)
@@ -74,7 +95,7 @@ def label_group_bar(fig, ax, data):
     ax.set_xlim(.5, ly + .5)
     ax.yaxis.grid(True)
 
-    plt.ylabel('Throughput (kbits / s)')
+    plt.ylabel(ylabel)
 
     scale = 1. / ly
     for pos in xrange(ly + 1):
@@ -91,17 +112,76 @@ def label_group_bar(fig, ax, data):
         add_line(ax, pos * scale, 1)
         ypos -= .1
 
-# if __name__ == '__main__':
-#     fig = plt.figure()
-#     ax = fig.add_subplot(1,1,1)
-#     label_group_bar(ax, data)
-#     fig.subplots_adjust(bottom=0.3)
-#     fig.savefig('label_group_bar_example.png')
+
+def double_bar_plot(data1, data2, ylabel, xlabel, xlabels, data1_label, data2_label):
+    assert len(data1) == len(data2), 'data1 and data2 must have same length'
+
+    fig, ax = plt.subplots()
+    ind = range(1, len(data1) + 1)
+    width = 0.35
+
+    rects1 = ax.bar(ind, data1, width, color='b')
+    rects2 = ax.bar(map(lambda x: x+width, ind), data2, width, color='r')
+    ax.set_ylabel(ylabel)
+    ax.set_xlabel(xlabel)
+    ax.set_xticks(map(lambda x: x+width, ind))
+
+    ax.set_xticklabels(xlabels)
+    ax.legend((rects1[0], rects2[0]), (data1_label, data2_label))
+    fig.subplots_adjust(bottom=0.3)
+    return fig
 
 
+def simple_hist(data, xlabel, xlabels, ylabel):
+    fig, ax = plt.subplots()
+    width = 0.8
+    left_margins = [i + (1 - width)/2 for i in range(len(data))]
+
+    rects1 = ax.bar(left_margins, data, width, color='b')
+    ax.set_ylabel(ylabel)
+    ax.set_xticks([x + width / 2 for x in left_margins])
+    ax.set_xlabel(xlabel)
+    ax.set_xticklabels(xlabels)
+    fig.subplots_adjust(bottom=0.3)
+    return fig
 
 
-def get_report(d_addr, t_mac, cached=False):
+def hist_with_line(xlabel, ylabel_sx, ylabel_dx, data_bars, data_line, xlabels):
+    assert len(data_line) == len(data_bars), "datasets mush be the same length"
+
+    fig, ax = plt.subplots()
+    width = 0.7
+    left_margins = [i + (1 - width)/2 for i in range(len(data_bars))]
+
+    rects1 = ax.bar(left_margins, data_bars, width, color='b')
+    ax.set_ylabel(ylabel_sx, color='b')
+    ax.set_xticks([x + width / 2 for x in left_margins])
+    ax.set_xlabel(xlabel)
+    ax.set_xticklabels(xlabels)
+    ax.yaxis.grid(True)
+    ax.xaxis.grid(True)
+
+    for tl in ax.get_yticklabels():
+        tl.set_color('b')
+
+    ax2 = ax.twinx()
+    ax2.set_ylabel(ylabel_dx, color='r')
+    ax2.plot(
+        [m + width / 2 for m in left_margins],
+        data_line,
+        color='r',
+        marker='o'
+    )
+    ax2.margins(0.1, 0.1)
+    ax2.set_ylim([0, None])
+
+    fig.subplots_adjust(bottom=0.3)
+    for tl in ax2.get_yticklabels():
+        tl.set_color('r')
+    return fig
+
+
+def get_throughput_report(d_addr, t_mac, cached=False):
     path = 'csv/throughput-{0}-{1}'.format(d_addr, t_mac)
     if cached:
         if os.path.exists(path):
@@ -121,49 +201,14 @@ def get_report(d_addr, t_mac, cached=False):
     return list(reader)
 
 
-def hist(y, labels):
-    x = range(len(y))
-    width = 1 / 1.2
-
-    plt.ylabel('Throughput (kbits / s)')
-    plt.xticks(map(lambda item: item + width / 2.0, x), labels)
-    plt.show()
-
-
 def avg(l):
     if len(l) == 0:
         return None
     return sum(l) / len(l)
 
 
-def main():
-    args = parse_args()
-
-    mac_url = lambda s_ip: 'http://{0}:38080/mac'.format(s_ip)
-
-    devices = []
-
-    print 'Collecting info about devices'
-    for t_addr in args.devices_ip_addresses:
-        t_addr = args.net_prefix + t_addr
-        print t_addr
-        # if t_addr.endswith('115'):
-        #     time.sleep(2)
-        #     for c in "PORCA TROIA GALAXY TAB DI MERDA SE NON TI SVEGLI!!!\n*FANCULO, FACCIO A MENO\n":
-        #         if c == '*':
-        #             time.sleep(1)
-        #             continue
-        #         time.sleep(0.01)
-        #         sys.stdout.write(c)
-        #         sys.stdout.flush()
-        #     continue
-
-        t_name, t_mac = requests.get(mac_url(t_addr)).content.split('\n')
-        devices.append(dict(name=t_name, mac=t_mac, ip=t_addr))
-
-    print devices
-
-    print 'Running benchmarks:'
+def bench_throughput(devices, dest_path, cache=False):
+    print 'Running throughput benchmark:'
     results = {}
     for receiver in devices:
         for sender in devices:
@@ -180,9 +225,8 @@ def main():
             while results[r_name][s_name] is None:
                 print r_name, ' <- ', sender['name']
 
-                get_report(receiver['ip'], sender['mac'], args.cache)  # warmup
-                report = get_report(receiver['ip'], sender['mac'], args.cache)
-                print report
+                get_throughput_report(receiver['ip'], sender['mac'], cache)  # warmup
+                report = get_throughput_report(receiver['ip'], sender['mac'], cache)
 
                 results[r_name][s_name] = avg(map(
                     lambda x:
@@ -193,12 +237,130 @@ def main():
                 if results[r_name][s_name] is None:
                     print 'FAILED. Retrying'
 
-    print 'Plotting'
+            print 'DONE.'
+
+    print 'Plotting throughput...'
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
-    label_group_bar(fig, ax, results)
+    label_group_bar(fig, ax, results, 'Throughput (kbits / s)')
     fig.subplots_adjust(bottom=0.3)
-    fig.savefig('plot.png')
+    fig.savefig(dest_path)
+
+
+def get_messages_per_sec_throughput(devices, dest_path, cache=False):
+    N_MESSAGES = 40
+
+    assert len(devices) >= 2, 'Need at least two devices'
+
+    master = devices[0]
+    others = devices[1:]
+    results = {}
+
+    for i in range(1, len(others) + 1):
+        targets = others[:i]
+        print targets
+
+        url = 'http://{0}:{1}/messages'.format(master['ip'], 38080)
+        f_name = lambda tt: 'csv/messages-{0}-{1}-{2}.csv'.format(
+            master['name'].replace(' ', '_'),
+            N_MESSAGES,
+            '-'.join([_d['name'].replace(' ', '_') for _d in tt])
+        )
+
+        if cache and os.path.exists(f_name(targets)):
+            print f_name(targets)
+            res_raw = open(f_name(targets), 'r')
+        else:
+            print url
+            print targets
+
+            vars = dict(
+                target=[d['mac'] for d in targets],
+                messages=N_MESSAGES
+            )
+
+            r = requests.get(url, params=vars)
+            print r.url
+
+            with open(f_name(targets), 'w') as f:
+                f.write(r.content)
+
+            res_raw = StringIO(r.content)
+
+        res = list(csv.DictReader(res_raw))
+
+        # from, to, message_size, started, received, finished
+        # % msg persi, RTT (finished-started), conn cost approx (rec - started)
+        if i not in results:
+            results[i] = {}
+        print 'first: ', min([int(t['finished']) for t in res]), ' , second: ', max([int(t['finished']) for t in res])
+        results[i]['timespan'] = ((max([int(t['finished']) for t in res]) - min([int(t['finished']) for t in res])) / 1000)
+        results[i]['rtts'] = [int(t['finished']) - int(t['started']) for t in res]
+        results[i]['conn_cost_approx'] = [int(t['received']) - int(t['started']) for t in res]
+        results[i]['received_msgs_rate'] = (len(res) * 100) / (N_MESSAGES * len(targets))
+        results[i]['received_msgs'] = len(res) / len(targets)
+
+    # print results
+
+
+    # fig = double_bar_plot(
+    #     [avg(results[i]['rtts']) for i in range(1, len(others) + 1)],
+    #     [avg(results[i]['conn_cost_approx']) for i in range(1, len(others) + 1)],
+    #     'Round trip time (ms)',
+    #     'Number of devices',
+    #     range(1, len(others) + 1),
+    #     'Average message round trip time',
+    #     'Cost of connection establishment (approx.)'
+    # )
+
+    fig = hist_with_line(
+        "Number of devices (excluding master)",
+        "Round trip time (ms)",
+        "Number of messages per second per user",
+        [avg(results[i]['rtts']) for i in range(1, len(others) + 1)],
+        [results[i]['received_msgs'] / results[i]['timespan'] for i in range(1, len(others) + 1)],
+        range(1, len(others) + 1)
+    )
+
+    fig.savefig('asd.png')
+
+
+def main():
+    args = parse_args()
+
+    mac_url = lambda s_ip: 'http://{0}:{1}/mac'.format(s_ip, args.port)
+
+    devices = []
+
+    print 'Collecting info about devices'
+    for t_addr in args.devices_ip_addresses:
+        t_addr = args.net_prefix + t_addr
+
+        sys.stdout.write(t_addr + '... ')
+        sys.stdout.flush()
+
+        if args.cache:
+            d = [x for x in HARDCODED_DEVICES if x['ip'] == t_addr]
+
+            if any(d):
+                device = d[0]
+                sys.stdout.write('Hello, {0}!\n'.format(device['name']))
+                sys.stdout.flush()
+                devices.append(device)
+                continue
+
+        t_name, t_mac = requests.get(mac_url(t_addr)).content.split('\n')
+        sys.stdout.write('Hello, {0}!\n'.format(t_name))
+        sys.stdout.flush()
+        devices.append(dict(name=t_name, mac=t_mac, ip=t_addr))
+
+    print devices
+
+    if args.throughput:
+        bench_throughput(devices, 'throughput.png', args.cache)
+
+    if args.messages:
+        get_messages_per_sec_throughput(devices, 'messages.png', args.cache)
 
 
 if __name__ == '__main__':
