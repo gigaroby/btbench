@@ -5,15 +5,22 @@ import requests
 import csv
 import matplotlib.pyplot as plt
 import sys
-import urllib
 
 # todo: remove me!!
 HARDCODED_DEVICES = [
-    {'name': 'Nexus 5', 'ip': '192.168.1.107', 'mac': 'BC:F5:AC:5C:50:87'},
-    {'name': 'Galaxy tab', 'ip': '192.168.1.102', 'mac': '18:22:7E:FC:83:09'},
-    {'name': 'Redmi', 'ip': '192.168.1.116', 'mac': '74:51:BA:46:90:A2'},
-    {'name': 'GalaxyS3', 'ip': '192.168.1.100', 'mac': '9C:65:B0:88:03:28'},
-    {'name': 'Nexus 7', 'ip': '192.168.1.111', 'mac': '50:46:5D:CC:65:4E'},
+    # {'name': 'Nexus 5', 'ip': '192.168.1.107', 'mac': 'BC:F5:AC:5C:50:87'},
+    # {'name': 'Galaxy tab', 'ip': '192.168.1.102', 'mac': '18:22:7E:FC:83:09'},
+    # {'name': 'Redmi', 'ip': '192.168.1.116', 'mac': '74:51:BA:46:90:A2'},
+    # {'name': 'GalaxyS3', 'ip': '192.168.1.100', 'mac': '9C:65:B0:88:03:28'},
+    # {'name': 'Nexus 7', 'ip': '192.168.1.111', 'mac': '50:46:5D:CC:65:4E'},
+
+    # # spaziodati
+    {'name': 'Nexus 5', 'ip': '10.0.1.49', 'mac': '34:FC:EF:34:30:2E'},
+    {'name': 'Nexus 7', 'ip': '10.0.1.50', 'mac': '50:46:5D:CC:65:4E'},
+    {'name': 'Galaxy tab', 'ip': '10.0.1.51', 'mac': '18:22:7E:FC:83:09'},
+    {'name': 'Redmi', 'ip': '10.0.1.52', 'mac': '74:51:BA:46:90:A2'},
+    {'name': 'HTC One M8', 'ip': '10.0.1.54', 'mac': '2C:8A:72:25:CB:4C'},
+    # {'name': 'OnePlus One', 'ip': '10.0.1.55', 'mac': ''}
 ]
 
 
@@ -90,6 +97,44 @@ def label_group_bar(fig, ax, data, ylabel):
     xticks = range(1, ly + 1)
 
     ax.bar(xticks, y, align='center')
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(x, rotation='vertical')
+    ax.set_xlim(.5, ly + .5)
+    ax.yaxis.grid(True)
+
+    plt.ylabel(ylabel)
+
+    scale = 1. / ly
+    for pos in xrange(ly + 1):
+        add_line(ax, pos * scale, -.1)
+    ypos = 1.02
+    while groups:
+        group = groups.pop()
+        pos = 0
+        for label, rpos in group:
+            lxpos = (pos + .5 * rpos) * scale
+            ax.text(lxpos, ypos, label, ha='center', transform=ax.transAxes)
+            add_line(ax, pos * scale, 1)
+            pos += rpos
+        add_line(ax, pos * scale, 1)
+        ypos -= .1
+
+
+def label_group_bar_with_err(fig, ax, data, ylabel):
+    groups = mk_groups(data)
+    xy = groups.pop()
+    x, y = zip(*xy)
+    ly = len(y)
+    xticks = range(1, ly + 1)
+
+    # ax.bar(xticks,
+    #        map(lambda _y: _y[0], y),
+    #        map(lambda _y: _y[1:], y),
+    #        align='center')
+    ax.errorbar(xticks,
+           map(lambda _y: _y[0], y),
+           yerr=[map(lambda _y: _y[1], y), map(lambda _y: _y[2], y)],
+           fmt='o')
     ax.set_xticks(xticks)
     ax.set_xticklabels(x, rotation='vertical')
     ax.set_xlim(.5, ly + .5)
@@ -207,6 +252,18 @@ def avg(l):
     return sum(l) / len(l)
 
 
+def trymin(l):
+    if len(l) == 0:
+        return None
+    return min(l)
+
+
+def trymax(l):
+    if len(l) == 0:
+        return None
+    return max(l)
+
+
 def bench_throughput(devices, dest_path, cache=False):
     print 'Running throughput benchmark:'
     results = {}
@@ -221,20 +278,26 @@ def bench_throughput(devices, dest_path, cache=False):
             if r_name not in results:
                 results[r_name] = {}
 
-            results[r_name][s_name] = None
-            while results[r_name][s_name] is None:
+            results[r_name][s_name] = (None,)
+            while None in results[r_name][s_name]:
                 print r_name, ' <- ', sender['name']
 
-                get_throughput_report(receiver['ip'], sender['mac'], cache)  # warmup
+                # get_throughput_report(receiver['ip'], sender['mac'], cache)  # warmup
                 report = get_throughput_report(receiver['ip'], sender['mac'], cache)
 
-                results[r_name][s_name] = avg(map(
+                _res = map(
                     lambda x:
                     ((float(x['bytes']) * 8) / 10 ** 3) /  # kBits
                     (float(x['nanotime']) / 10 ** 9),      # / s
-                    report))
+                    report)
 
-                if results[r_name][s_name] is None:
+                results[r_name][s_name] = (
+                    avg(_res),
+                    trymin(_res),
+                    trymax(_res)
+                )
+
+                if None in results[r_name][s_name]:
                     print 'FAILED. Retrying'
 
             print 'DONE.'
@@ -242,7 +305,7 @@ def bench_throughput(devices, dest_path, cache=False):
     print 'Plotting throughput...'
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
-    label_group_bar(fig, ax, results, 'Throughput (kbits / s)')
+    label_group_bar_with_err(fig, ax, results, 'Throughput (kbits / s)')
     fig.subplots_adjust(bottom=0.3)
     fig.savefig(dest_path)
 
@@ -316,7 +379,7 @@ def get_messages_per_sec_throughput(devices, dest_path, cache=False):
     fig = hist_with_line(
         "Number of devices (excluding master)",
         "Round trip time (ms)",
-        "Number of messages per second per user",
+        "Number of messages per second per device",
         [avg(results[i]['rtts']) for i in range(1, len(others) + 1)],
         [results[i]['received_msgs'] / results[i]['timespan'] for i in range(1, len(others) + 1)],
         range(1, len(others) + 1)
