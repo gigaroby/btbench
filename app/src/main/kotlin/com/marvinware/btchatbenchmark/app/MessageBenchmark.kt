@@ -37,8 +37,6 @@ data class MessageTimes(
 Message data class MessageRequest(var uuid: String = "", var content: ByteArray = ByteArray(0))
 Message data class MessageResponse(Index(0) var uuid: String = "", Index(1) var received: Long = 0)
 
-
-
 class MessageRunner(
         localName: String,
         devices: List<BluetoothDevice>,

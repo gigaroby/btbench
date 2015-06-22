@@ -1,10 +1,12 @@
 from cStringIO import StringIO
 import argparse
 import os
+import numpy
 import requests
 import csv
 import matplotlib.pyplot as plt
 import sys
+from scipy.interpolate import interp1d
 
 # todo: remove me!!
 HARDCODED_DEVICES = [
@@ -47,12 +49,17 @@ def parse_args():
                         action='store_const', const=True, default=False,
                         help='Throughput test.')
 
+    parser.add_argument('--throughput-over-time', '-T',
+                        dest='throughput_over_time',
+                        action='store_const', const=True, default=False,
+                        help='Throughput over time test.')
+
     parser.add_argument('--messages', '-m', dest='messages',
                         action='store_const', const=True, default=False,
                         help='Messages per second test.')
 
     args = parser.parse_args()
-    if not args.throughput and not args.messages:
+    if not args.throughput and not args.messages and not args.throughput_over_time:
         print 'ERROR. You must specify at least an action!'
         print
 
@@ -127,13 +134,12 @@ def label_group_bar_with_err(fig, ax, data, ylabel):
     ly = len(y)
     xticks = range(1, ly + 1)
 
-    # ax.bar(xticks,
-    #        map(lambda _y: _y[0], y),
-    #        map(lambda _y: _y[1:], y),
-    #        align='center')
+    yerr=\
+        [map(lambda _y: _y[1], y), map(lambda _y: _y[2], y)] if len(y[0]) == 3 else map(lambda _y: _y[1], y)
+
     ax.errorbar(xticks,
            map(lambda _y: _y[0], y),
-           yerr=[map(lambda _y: _y[1], y), map(lambda _y: _y[2], y)],
+           yerr=yerr,
            fmt='o')
     ax.set_xticks(xticks)
     ax.set_xticklabels(x, rotation='vertical')
@@ -267,6 +273,7 @@ def trymax(l):
 def bench_throughput(devices, dest_path, cache=False):
     print 'Running throughput benchmark:'
     results = {}
+    results_stddev = {}
     for receiver in devices:
         for sender in devices:
             if receiver == sender:
@@ -277,6 +284,7 @@ def bench_throughput(devices, dest_path, cache=False):
 
             if r_name not in results:
                 results[r_name] = {}
+                results_stddev[r_name] = {}
 
             results[r_name][s_name] = (None,)
             while None in results[r_name][s_name]:
@@ -297,6 +305,11 @@ def bench_throughput(devices, dest_path, cache=False):
                     trymax(_res)
                 )
 
+                results_stddev[r_name][s_name] = (
+                    numpy.mean(_res),
+                    numpy.std(_res)
+                )
+
                 if None in results[r_name][s_name]:
                     print 'FAILED. Retrying'
 
@@ -308,6 +321,45 @@ def bench_throughput(devices, dest_path, cache=False):
     label_group_bar_with_err(fig, ax, results, 'Throughput (kbits / s)')
     fig.subplots_adjust(bottom=0.3)
     fig.savefig(dest_path)
+
+
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    label_group_bar_with_err(fig, ax, results_stddev, 'Throughput (kbits / s)')
+    fig.subplots_adjust(bottom=0.3)
+    fig.savefig('throughput-stdvar.png')
+
+
+def plot_throughput_over_time(device1, device2, cache=False):
+    for sender, receiver in ((device1, device2), (device2, device1)):
+        print receiver['name'], ' <- ', sender['name']
+
+        report = get_throughput_report(receiver['ip'], sender['mac'], cache)
+        report = list(report)
+
+        print 'Plotting...'
+
+        result = []
+
+        # for i in range((len(report)/20) + 1):
+        #     result.append(avg([
+        #         ((float(x['bytes']) * 8) / 10 ** 3) /  # kBits
+        #         (float(x['nanotime']) / 10 ** 9)  # sec
+        #         for x in report[i:i+len(report)/20]]
+        #     ))
+        for x in report:
+            result.append(
+                ((float(x['bytes']) * 8) / 10 ** 3) /  # kBits
+                (float(x['nanotime']) / 10 ** 9)  # sec
+            )
+
+        x = numpy.linspace(0, len(result), len(result))
+        xnew = numpy.linspace(0, len(result), 100)
+        y = result
+        # f2 = interp1d(x, y)
+        f = numpy.poly1d(numpy.polyfit(x, y, 4))
+        plt.plot(x, y, 'o', xnew, f(xnew), '-')
+        plt.show()
 
 
 def get_messages_per_sec_throughput(devices, dest_path, cache=False):
@@ -421,6 +473,9 @@ def main():
 
     if args.throughput:
         bench_throughput(devices, 'throughput.png', args.cache)
+
+    if args.throughput_over_time:
+        plot_throughput_over_time(devices[0], devices[1], args.cache)
 
     if args.messages:
         get_messages_per_sec_throughput(devices, 'messages.png', args.cache)
