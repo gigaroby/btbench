@@ -9,6 +9,8 @@ import sys
 from scipy.interpolate import interp1d
 
 # todo: remove me!!
+import time
+
 HARDCODED_DEVICES = [
     # {'name': 'Nexus 5', 'ip': '192.168.1.107', 'mac': 'BC:F5:AC:5C:50:87'},
     # {'name': 'Galaxy tab', 'ip': '192.168.1.102', 'mac': '18:22:7E:FC:83:09'},
@@ -58,8 +60,13 @@ def parse_args():
                         action='store_const', const=True, default=False,
                         help='Messages per second test.')
 
+    parser.add_argument('--token', '-k', dest='token',
+                        action='store_const', const=True, default=False,
+                        help='Token RTT test.')
+
     args = parser.parse_args()
-    if not args.throughput and not args.messages and not args.throughput_over_time:
+    if not args.throughput and not args.messages \
+            and not args.throughput_over_time and not args.token:
         print 'ERROR. You must specify at least an action!'
         print
 
@@ -232,6 +239,24 @@ def hist_with_line(xlabel, ylabel_sx, ylabel_dx, data_bars, data_line, xlabels):
     return fig
 
 
+def stacked_bars(data1, data2, xlabel, xlabels, ylabel, legend1, legend2):
+    assert len(data1) == len(data2)
+
+    fig, ax = plt.subplots()
+    width = 0.8
+    left_margins = [i + (1 - width)/2 for i in range(len(data1))]
+
+    rects1 = ax.bar(left_margins, data1, width, color='b')
+    rects2 = ax.bar(left_margins, data2, width, bottom=data1, color='r')
+    ax.set_ylabel(ylabel)
+    ax.set_xticks([x + width / 2 for x in left_margins])
+    ax.set_xlabel(xlabel)
+    ax.set_xticklabels(xlabels)
+    fig.subplots_adjust(bottom=0.3)
+    ax.legend((rects1[0], rects2[0]), (legend1, legend2))
+    return fig
+
+
 def get_throughput_report(d_addr, t_mac, cached=False):
     path = 'csv/throughput-{0}-{1}'.format(d_addr, t_mac)
     if cached:
@@ -268,6 +293,81 @@ def trymax(l):
     if len(l) == 0:
         return None
     return max(l)
+
+
+def bench_token(devices, payload_size=512, num_rounds=5,
+                dest_path='token.png', cache=False):
+    print 'Running token benchmark:'
+    results = {}
+    url = 'http://{0}:38080/token'.format(devices[0]['ip'])
+    res_url = 'http://{0}:38080/tokres'.format(devices[0]['ip'])
+    targets = map(lambda x: x['mac'], devices[1:])
+
+    path = 'csv/pl' + str(payload_size) + '_nr' + str(num_rounds) + '_' + '_'.join([d['mac'] for d in devices])
+
+    if cache and os.path.exists(path):
+        csv_file = open(path, 'r').read()
+    else:
+        r = requests.get(url, params=dict(devices=targets,
+                                          payloadLength=payload_size,
+                                          rounds=num_rounds))
+        uuid = r.content.strip()
+        print 'uuid: ', uuid
+
+        csv_file = None
+        while True:
+            time.sleep(1)
+            r = requests.get(res_url, params=dict(uuid=uuid))
+            if r.status_code == 200:
+                csv_file = r.content
+                break
+
+    with open(path, 'w') as f:
+        f.write(csv_file)
+
+    reader = csv.DictReader(StringIO(csv_file))
+    l_reader = list(reader)
+
+    for v in l_reader:
+        key = v['sender'] + '->' + v['receiver']
+        if key not in results:
+            results[key] = dict(rtt=[], connection=[], throughput=[],
+                                  sleep_time=[])
+        results[key]['rtt'].append(int(v['finished']) - int(v['started']))
+        results[key]['connection'].append(int(v['connected']) - int(v['started']))
+        results[key]['sleep_time'].append(int(v['sleep']))
+        results[key]['throughput'].append(
+            (payload_size / 1000.0) /  # KBytes
+            ((int(v['finished']) - int(v['started'])) * 1000.0)  # s
+        )
+
+    # compute the averages
+    for r in results:
+        item = results[r]
+        item['rtt'] = avg(item['rtt'])
+        item['connection'] = avg(item['connection'])
+        item['throughput'] = avg(item['throughput'])
+    return results
+
+
+def token_plot(devices, cache=True):
+    conns = []
+    rtts = []
+    sizes = (512, 1024, 2048, 4096)
+    for l in sizes:
+        print 'testing with payload=', l
+        res = bench_token(devices, l, 5, '', cache)
+        conn_cost = avg([item['connection'] for item in res.itervalues()])
+        rtt = avg([item['rtt'] - item['connection'] for item in res.itervalues()])
+        conns.append(conn_cost)
+        rtts.append(rtt)
+
+    print 'Plotting token rtt benchmark...'
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    fig = stacked_bars(conns, rtts, 'Size of payload (KB)', map(str, sizes), 'Time (ms)', 'Connection cost', 'RTT')
+    fig.subplots_adjust(bottom=0.3)
+    fig.savefig('token.png')
 
 
 def bench_throughput(devices, dest_path, cache=False):
@@ -479,6 +579,9 @@ def main():
 
     if args.messages:
         get_messages_per_sec_throughput(devices, 'messages.png', args.cache)
+
+    if args.token:
+        token_plot(devices, args.cache)
 
 
 if __name__ == '__main__':

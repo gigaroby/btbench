@@ -4,6 +4,7 @@
     <modules>
       <module fileurl="file://$PROJECT_DIR$/BtChatBenchmark.iml" filepath="$PROJECT_DIR$/BtChatBenchmark.iml" />
       <module fileurl="file://$PROJECT_DIR$/app/app.iml" filepath="$PROJECT_DIR$/app/app.iml" />
+      <module fileurl="file://$PROJECT_DIR$/btbench.iml" filepath="$PROJECT_DIR$/btbench.iml" />
     </modules>
   </component>
 </project>

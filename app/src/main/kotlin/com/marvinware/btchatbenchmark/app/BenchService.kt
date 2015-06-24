@@ -153,11 +153,13 @@ public class BenchService: Service() {
 
         private fun handleTok(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
             // params:
-            // devices - payload_length
+            // devices - payloadLength - rounds
 
             val params = decodeParameters(session.getQueryParameterString())
             val devices: List<String> = params.getOrElse("devices", {listOf()})
                     .filter { mac -> BluetoothAdapter.checkBluetoothAddress(mac) }
+            val payloadLength = params.getOrElse("payloadLength", {null})?.get(0)?.toInt() ?: PAYLOAD_LENGTH
+            val numRounds = params.getOrElse("rounds", {null})?.get(0)?.toInt() ?: NUM_ROUNDS
 
             if(devices.size() < 2) {
                 return NanoHTTPD.Response(
@@ -167,7 +169,8 @@ public class BenchService: Service() {
                 )
             }
 
-            val br = TokenRunner(UUID.randomUUID().toString(), PAYLOAD_LENGTH, devices.toArrayList(), btAdapter)
+            Log.d(TAG, "Starting Token with payload: ${payloadLength} and numrounds: ${numRounds}")
+            val br = TokenRunner(UUID.randomUUID().toString(), payloadLength, numRounds, devices.toArrayList(), btAdapter)
             val result = br.execute()
             return NanoHTTPD.Response(NanoHTTPD.Response.Status.OK, "text/plain", result.toString())
         }
@@ -186,16 +189,16 @@ public class BenchService: Service() {
         val uuid = UUID.fromString(session.getParms().get("uuid")).toString()
         val res = ResultsGetter(uuid).execute()
         if (res == null) {
-            return NanoHTTPD.Response(NanoHTTPD.Response.Status.OK, "text/csv", "no results yet")
+            return NanoHTTPD.Response(NanoHTTPD.Response.Status.NO_CONTENT, "text/csv", "no results yet")
         }
 
         val s = StringBuilder()
         val format = CSVFormat.DEFAULT.withRecordSeparator("\n");
         val printer = CSVPrinter(s, format)
-        printer.printRecord("sender", "receiver", "payloadSize", "numRounds", "started", "connected", "received", "finished")
+        printer.printRecord("sender", "receiver", "payloadSize", "numRounds", "started", "connected", "received", "finished", "sleep")
 
         res.forEach { r ->
-            printer.printRecord(r.senderName, r.receiverName, r.pingPayloadSize, r.numRounds, r.started, r.connected, r.received, r.finished)
+            printer.printRecord(r.senderName, r.receiverName, r.pingPayloadSize, r.numRounds, r.started, r.connected, r.received, r.finished, r.sleep)
         }
 
         return NanoHTTPD.Response(NanoHTTPD.Response.Status.OK, "text/csv", s.toString())
