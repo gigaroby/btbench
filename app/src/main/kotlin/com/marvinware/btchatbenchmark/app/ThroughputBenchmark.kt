@@ -7,6 +7,7 @@ import android.util.Log
 import org.msgpack.MessagePack
 import org.msgpack.annotation.Message
 import java.io.IOException
+import java.io.OutputStream
 import java.util.*
 import java.util.concurrent.ThreadPoolExecutor
 
@@ -17,11 +18,7 @@ Message data class ThroughputMessage(var content: ByteArray = ByteArray(0))
 
 data class ThroughputResult(val localName: String, val remoteName: String, val bytes: Int, val time: Long)
 
-class ThroughputRunner(localName: String, device: BluetoothDevice, iterations:Int) {
-    val localName = localName
-    val iterations = iterations
-    val device = device
-
+class ThroughputRunner(val localName: String, val device: BluetoothDevice, val iterations:Int, val btAdapter: BluetoothAdapter) {
     fun execute(): List<ThroughputResult> {
         val msgpack = MessagePack()
         val remoteName = device.getName()
@@ -29,15 +26,18 @@ class ThroughputRunner(localName: String, device: BluetoothDevice, iterations:In
 
         try {
             Log.d(THROUGHPUT_TAG, "attempting connection with ${device.getName()}")
-            val socket = device.createInsecureRfcommSocketToServiceRecord(THROUGHPUT_UUID)
-            socket.connect()
+            val connector = BtConnector(device, false, btAdapter, listOf(THROUGHPUT_UUID))
+//            if (!socket.isConnected())
+            val socket = connector.connect()
             val input = socket.getInputStream()
             for(i in 1..iterations){
                 val start = System.nanoTime()
                 val msg = msgpack.read(input, javaClass<ThroughputMessage>())
                 val end = System.nanoTime()
                 runs.add(ThroughputResult(localName, remoteName, msg.content.size(), end-start));
+                Log.d(THROUGHPUT_TAG, "read message $i of $iterations")
             }
+            input.close()
             socket.close()
             Log.d(THROUGHPUT_TAG, "${iterations} iterations completed")
         } catch(i: IOException) {
@@ -72,7 +72,7 @@ class ThroughputListener(adapter: BluetoothAdapter, outgoing: ThreadPoolExecutor
 class ThroughputHandler(socket: BluetoothSocket?) : Runnable {
     private val socket = socket
     private val random = Random()
-    private val defaultSize = 4096
+    private val defaultSize =  2 * 1000 * 1024  // 2 MBytes
 
     override fun run() {
         if(socket == null){
@@ -94,5 +94,6 @@ class ThroughputHandler(socket: BluetoothSocket?) : Runnable {
         } catch(i: IOException) {
             Log.e(THROUGHPUT_TAG, "error sending message", i)
         }
+        socket.close()
     }
 }

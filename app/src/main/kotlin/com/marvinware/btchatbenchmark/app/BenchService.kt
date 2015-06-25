@@ -61,8 +61,8 @@ public class BenchService: Service() {
     }
 
     inner class BenchmarkServer: NanoHTTPD(38080) {
-        private val defaultIterations = 1000
-        private val defaultMessageSize = 1024
+        private val defaultIterations = 10
+        private val defaultMessageSize = 2 * 1000 * 1024
         private val defaultMessages = 1
 
         override fun serve(session: NanoHTTPD.IHTTPSession): NanoHTTPD.Response {
@@ -140,7 +140,7 @@ public class BenchService: Service() {
             val s = StringBuilder()
             val device = btAdapter.getRemoteDevice(target)
             Log.d(TAG, "going to pull from ${device.getName()} [${device.getAddress()}]")
-            val br = ThroughputRunner(btAdapter.getName(), device, iterations)
+            val br = ThroughputRunner(btAdapter.getName(), device, iterations, btAdapter)
             val results = br.execute()
             val format = CSVFormat.DEFAULT.withRecordSeparator("\n");
             val printer = CSVPrinter(s, format)
