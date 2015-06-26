@@ -159,22 +159,19 @@ class ResultsGetter(uuid: String) {
     }
 }
 
-class TokenListener(adapter: BluetoothAdapter, outgoing: ThreadPoolExecutor): Runnable {
-    private val btAdapter = adapter
-    private val outgoing = outgoing
-
-
+class TokenListener(private val btAdapter: BluetoothAdapter, private val outgoing: ThreadPoolExecutor): Runnable {
     override fun run() {
         Log.d(TOKEN_TAG, "waiting for messages")
-        var serverSocket = btAdapter.listenUsingInsecureRfcommWithServiceRecord(TOKEN_TAG, TOKEN_UUID)
 
         while(true) {
             try{
+                var serverSocket = btAdapter.listenUsingInsecureRfcommWithServiceRecord(TOKEN_TAG, TOKEN_UUID)
                 val socket = serverSocket.accept()
                 val device = socket.getRemoteDevice()
                 val received = System.currentTimeMillis()
                 Log.d(TOKEN_TAG, "got a message from ${device.getName()}[${device.getAddress()}]")
                 outgoing.execute(TokenHandler(socket, received, btAdapter))
+                serverSocket.close()
             } catch (e: IOException){
                 Log.e(TOKEN_TAG, "failed to get message", e)
             }
@@ -182,16 +179,17 @@ class TokenListener(adapter: BluetoothAdapter, outgoing: ThreadPoolExecutor): Ru
     }
 }
 
-class TokenHandler(socket: BluetoothSocket, received: Long, btAdapter: BluetoothAdapter): Runnable {
-    val socket = socket
-    val received = received
-    val btAdapter = btAdapter
-
+class TokenHandler(val socket: BluetoothSocket, val received: Long, val btAdapter: BluetoothAdapter): Runnable {
     fun doMasterStuff(token: Token): Boolean {
         token.remainingRounds -= 1
         Log.d(TOKEN_TAG, "${token.remainingRounds} rounds remaining!")
+
+        var res = results.getOrElse(token.uuid, { arrayOf<BenchmarkRecord>() }).toArrayList()
+        res.addAll(token.times)
+        token.times = arrayListOf<BenchmarkRecord>()
+        results.put(token.uuid, res.toTypedArray())
+
         if (token.remainingRounds <= 0) {
-            results.put(token.uuid, token.times.toTypedArray())
             return true
         }
         return false
@@ -206,7 +204,7 @@ class TokenHandler(socket: BluetoothSocket, received: Long, btAdapter: Bluetooth
             val output = socket.getOutputStream()
 
             val ping = msgpack.read(input, javaClass<Ping>())
-            Log.d(TOKEN_TAG, "got ping ${ping.toString()}")
+            Log.d(TOKEN_TAG, "Got the ping")
             val outgoing = Pong(true, received)
             Log.d(TOKEN_TAG, "writing pong ${outgoing.toString()}")
             msgpack.write(output, outgoing)
